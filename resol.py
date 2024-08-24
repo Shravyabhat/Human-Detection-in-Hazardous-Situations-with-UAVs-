@@ -1,0 +1,72 @@
+import os
+import time
+from PIL import Image
+import numpy as np
+import tensorflow as tf
+import tensorflow_hub as hub
+import matplotlib.pyplot as plt
+
+os.environ["TFHUB_DOWNLOAD_PROGRESS"] = "True"
+
+# Declaring Constants
+INPUT_FOLDER = "./Low_res"
+OUTPUT_FOLDER = "./high_res"
+SAVED_MODEL_PATH = "https://tfhub.dev/captain-pool/esrgan-tf2/1"
+
+def preprocess_image(image_path):
+    """ Loads image from path and preprocesses to make it model ready """
+    hr_image = tf.image.decode_image(tf.io.read_file(image_path))
+    # If PNG, remove the alpha channel. The model only supports images with 3 color channels.
+    if hr_image.shape[-1] == 4:
+        hr_image = hr_image[..., :-1]
+    hr_size = (tf.convert_to_tensor(hr_image.shape[:-1]) // 4) * 4
+    hr_image = tf.image.crop_to_bounding_box(hr_image, 0, 0, hr_size[0], hr_size[1])
+    hr_image = tf.cast(hr_image, tf.float32)
+    return tf.expand_dims(hr_image, 0)
+
+def save_image(image, filename):
+    """ Saves unscaled Tensor Images. """
+    if not isinstance(image, Image.Image):
+        image = tf.clip_by_value(image, 0, 255)
+        image = Image.fromarray(tf.cast(image, tf.uint8).numpy())
+    image.save(os.path.join(OUTPUT_FOLDER, f"{filename}.jpg"))
+    print(f"Saved as {filename}.jpg")
+
+def plot_image(image, title=""):
+    """ Plots images from image tensors. """
+    image = np.asarray(image)
+    image = tf.clip_by_value(image, 0, 255)
+    image = Image.fromarray(tf.cast(image, tf.uint8).numpy())
+    plt.imshow(image)
+    plt.axis("off")
+    plt.title(title)
+    plt.show()
+
+# Create output folder if it doesn't exist
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+# Load ESRGAN model from TensorFlow Hub
+model = hub.load(SAVED_MODEL_PATH)
+
+# Process each image in the input folder
+for filename in os.listdir(INPUT_FOLDER):
+    if filename.endswith((".jpg", ".png")):
+        image_path = os.path.join(INPUT_FOLDER, filename)
+        image_name = os.path.splitext(filename)[0]
+
+        # Preprocess the image
+        hr_image = preprocess_image(image_path)
+
+        # Plot and save original image
+        plot_image(tf.squeeze(hr_image), title=f"Original Image: {image_name}")
+        save_image(tf.squeeze(hr_image), filename=f"{image_name}_original")
+
+        # Generate super resolution image using the model
+        start = time.time()
+        fake_image = model(hr_image)
+        fake_image = tf.squeeze(fake_image)
+        print(f"Time Taken for {image_name}: {time.time() - start:.2f} seconds")
+
+        # Plot and save super resolution image
+        plot_image(tf.squeeze(fake_image), title=f"Super Resolution: {image_name}")
+        save_image(tf.squeeze(fake_image), filename=f"{image_name}_superres")
